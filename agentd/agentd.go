@@ -1,21 +1,26 @@
 package agentd
 
 import (
-	"agent/util"
 	"fmt"
+	"github.com/aiyi/agent/util"
 	"log"
 	"net"
 	"os"
+	"sync"
 )
 
-type AGENTD struct {
+type AgentD struct {
 	// 64bit atomic vars need to be first for proper alignment on 32bit platforms
 	clientIDSequence int64
+
+	sync.RWMutex
 
 	opts *AgentdOptions
 
 	tcpAddr     *net.TCPAddr
 	tcpListener net.Listener
+
+	clients map[string]*Conn
 
 	notifyChan chan interface{}
 	exitChan   chan int
@@ -24,9 +29,10 @@ type AGENTD struct {
 	logger *log.Logger
 }
 
-func NewAGENTD(opts *AgentdOptions) *AGENTD {
-	ad := &AGENTD{
+func NewAgentD(opts *AgentdOptions) *AgentD {
+	a := &AgentD{
 		opts:       opts,
+		clients:    make(map[string]*Conn),
 		exitChan:   make(chan int),
 		notifyChan: make(chan interface{}),
 		logger:     log.New(os.Stderr, "[agentd] ", log.Ldate|log.Ltime|log.Lmicroseconds),
@@ -34,41 +40,74 @@ func NewAGENTD(opts *AgentdOptions) *AGENTD {
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", opts.TcpAddress)
 	if err != nil {
-		ad.logf("FATAL: failed to resolve TCP address (%s) - %s", opts.TcpAddress, err)
+		a.logf("FATAL: failed to resolve TCP address (%s) - %s", opts.TcpAddress, err)
 		os.Exit(1)
 	}
-	ad.tcpAddr = tcpAddr
+	a.tcpAddr = tcpAddr
 
-	return ad
+	return a
 }
 
-func (ad *AGENTD) Main() {
-	tcpListener, err := net.Listen("tcp", ad.tcpAddr.String())
+func (a *AgentD) AddClient(clientID string, client *Conn) {
+	a.Lock()
+	defer a.Unlock()
+
+	_, ok := a.clients[clientID]
+	if ok {
+		return
+	}
+	a.clients[clientID] = client
+}
+
+func (a *AgentD) RemoveClient(clientID string) {
+	a.Lock()
+	defer a.Unlock()
+
+	_, ok := a.clients[clientID]
+	if !ok {
+		return
+	}
+	delete(a.clients, clientID)
+}
+
+func (a *AgentD) GetClient(clientID string) (*Conn, bool) {
+	a.RLock()
+	defer a.RUnlock()
+
+	c, ok := a.clients[clientID]
+	if !ok {
+		return nil, false
+	}
+	return c, true
+}
+
+func (a *AgentD) Main() {
+	tcpListener, err := net.Listen("tcp", a.tcpAddr.String())
 	if err != nil {
-		ad.logf("FATAL: listen (%s) failed - %s", ad.tcpAddr, err)
+		a.logf("FATAL: listen (%s) failed - %s", a.tcpAddr, err)
 		os.Exit(1)
 	}
-	ad.tcpListener = tcpListener
+	a.tcpListener = tcpListener
 
-	ad.waitGroup.Wrap(func() {
-		tcpServer(ad)
+	a.waitGroup.Wrap(func() {
+		tcpServer(a)
 	})
 }
 
-func (ad *AGENTD) Exit() {
-	if ad.tcpListener != nil {
-		ad.tcpListener.Close()
+func (a *AgentD) Exit() {
+	if a.tcpListener != nil {
+		a.tcpListener.Close()
 	}
 
 	// we want to do this last as it closes the idPump (if closed first it
 	// could potentially starve items in process and deadlock)
-	close(ad.exitChan)
-	ad.waitGroup.Wait()
+	close(a.exitChan)
+	a.waitGroup.Wait()
 }
 
-func (ad *AGENTD) logf(f string, args ...interface{}) {
-	if ad.logger == nil {
+func (a *AgentD) logf(f string, args ...interface{}) {
+	if a.logger == nil {
 		return
 	}
-	ad.logger.Output(2, fmt.Sprintf(f, args...))
+	a.logger.Output(2, fmt.Sprintf(f, args...))
 }

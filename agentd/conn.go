@@ -73,6 +73,8 @@ func (t *ProducerTransaction) finish() {
 type Conn struct {
 	mtx sync.Mutex
 
+	agentd *AgentD
+
 	addr string
 	conn *net.TCPConn
 
@@ -101,12 +103,13 @@ type Conn struct {
 }
 
 // NewConn returns a new Conn instance
-func NewConn(conn net.Conn) *Conn {
+func NewConn(a *AgentD, conn net.Conn) *Conn {
 	return &Conn{
-		addr: conn.RemoteAddr().String(),
-		conn: conn.(*net.TCPConn),
-		r:    bufio.NewReader(conn),
-		w:    bufio.NewWriter(conn),
+		agentd: a,
+		addr:   conn.RemoteAddr().String(),
+		conn:   conn.(*net.TCPConn),
+		r:      bufio.NewReader(conn),
+		w:      bufio.NewWriter(conn),
 
 		protocol: &LtvProtocol{},
 
@@ -138,6 +141,7 @@ func (c *Conn) Start() {
 	atomic.StoreInt32(&c.readLoopRunning, 1)
 	go c.readLoop()
 	go c.writeLoop()
+	c.agentd.AddClient(strings.Split(c.addr, ":")[0], c)
 }
 
 // Close idempotently initiates connection close
@@ -337,6 +341,8 @@ func (c *Conn) close() {
 	//            and cleanup goroutine)
 	//         c. underlying TCP connection close
 	//
+	c.agentd.RemoveClient(strings.Split(c.addr, ":")[0])
+
 	c.stopper.Do(func() {
 		c.log(LogLevelInfo, "beginning close")
 		atomic.StoreInt32(&c.closeFlag, 1)

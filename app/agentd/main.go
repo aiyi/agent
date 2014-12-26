@@ -1,10 +1,10 @@
 package main
 
 import (
-	"agent/agentd"
-	"agent/util"
 	"flag"
 	"fmt"
+	"github.com/aiyi/agent/agentd"
+	"github.com/aiyi/agent/util"
 	"github.com/mreiferson/go-options"
 	"os"
 	"os/signal"
@@ -15,11 +15,10 @@ var (
 	flagset = flag.NewFlagSet("agentd", flag.ExitOnError)
 
 	showVersion = flagset.Bool("version", false, "print version string")
-	tcpAddress  = flagset.String("tcp-address", "0.0.0.0:4050", "<addr>:<port> to listen on for TCP clients")
+	tcpAddress  = flagset.String("tcp-address", "0.0.0.0:3002", "<addr>:<port> to listen on for TCP clients")
 )
 
 func main() {
-	fmt.Println("Hello World!")
 	flagset.Parse(os.Args[1:])
 
 	if *showVersion {
@@ -31,9 +30,13 @@ func main() {
 
 	opts := agentd.NewAgentdOptions()
 	options.Resolve(opts, flagset, nil)
-	ad := agentd.NewAGENTD(opts)
+	a := agentd.NewAgentD(opts)
+	a.Main()
 
-	ad.Main()
+	r := agentd.NewRestServer(a)
+	r.Main()
+
 	<-signalChan
-	ad.Exit()
+	r.Exit()
+	a.Exit()
 }

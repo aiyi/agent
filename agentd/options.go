@@ -8,7 +8,7 @@ type AgentdOptions struct {
 
 func NewAgentdOptions() *AgentdOptions {
 	o := &AgentdOptions{
-		TcpAddress: "0.0.0.0:4050",
+		TcpAddress: "0.0.0.0:3002",
 	}
 
 	return o
