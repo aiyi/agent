@@ -84,7 +84,7 @@ func NewRestServer(a *AgentD) *RestServer {
 }
 
 func restServer(r *RestServer) {
-	log.Printf("start listening on localhost:8080")
+	log.Printf("start listening on %s:8080", r.agentd.GetServerIP())
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
@@ -93,12 +93,14 @@ func (r *RestServer) Main() {
 	u.agentd = r.agentd
 	u.Register()
 
+	url := "http://" + r.agentd.GetServerIP() + ":8080"
+
 	// Optionally, you can install the Swagger Service which provides a nice Web UI on your REST API
 	// You need to download the Swagger HTML5 assets and change the FilePath location in the config below.
 	// Open http://localhost:8080/apidocs and enter http://localhost:8080/apidocs.json in the api input field.
 	config := swagger.Config{
 		WebServices:    restful.RegisteredWebServices(), // you control what services are visible
-		WebServicesUrl: "http://localhost:8080",
+		WebServicesUrl: url,
 		ApiPath:        "/apidocs.json",
 
 		// Optionally, specifiy where the UI is located

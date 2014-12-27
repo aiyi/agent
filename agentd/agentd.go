@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -46,6 +47,10 @@ func NewAgentD(opts *AgentdOptions) *AgentD {
 	a.tcpAddr = tcpAddr
 
 	return a
+}
+
+func (a *AgentD) GetServerIP() string {
+	return strings.Split(a.tcpAddr.String(), ":")[0]
 }
 
 func (a *AgentD) AddClient(clientID string, client *Conn) {

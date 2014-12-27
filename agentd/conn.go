@@ -51,28 +51,23 @@ func logPrefix(lvl LogLevel) string {
 	return prefix
 }
 
-// ProducerTransaction is returned by the async publish methods
+// cmdTransaction is returned by the async send methods
 // to retrieve metadata about the command after the
 // response is received.
-type ProducerTransaction struct {
-	cmd      *Command
-	doneChan chan *ProducerTransaction
+type cmdTransaction struct {
+	req      Message
+	doneChan chan *cmdTransaction
 	resp     Message
 }
 
-func (t *ProducerTransaction) finish() {
+func (t *cmdTransaction) finish() {
 	if t.doneChan != nil {
 		t.doneChan <- t
 	}
 }
 
-// Conn represents a connection to nsqd
-//
-// Conn exposes a set of callbacks for the
-// various events that occur on a connection
+// Conn represents a client connection
 type Conn struct {
-	mtx sync.Mutex
-
 	agentd *AgentD
 
 	addr string
@@ -87,13 +82,13 @@ type Conn struct {
 	r io.Reader
 	w io.Writer
 
-	transactionChan chan *ProducerTransaction
+	transactionChan chan *cmdTransaction
 	msgResponseChan chan Message
 	exitChan        chan int
 	drainReady      chan int
 
-	transactions        []*ProducerTransaction
-	concurrentProducers int32
+	transactions      []*cmdTransaction
+	concurrentSenders int32
 
 	closeFlag int32
 	stopper   sync.Once
@@ -116,7 +111,7 @@ func NewConn(a *AgentD, conn net.Conn) *Conn {
 		logger: log.New(os.Stderr, "", log.Flags()),
 		logLvl: LogLevelInfo,
 
-		transactionChan: make(chan *ProducerTransaction),
+		transactionChan: make(chan *cmdTransaction),
 		msgResponseChan: make(chan Message),
 		exitChan:        make(chan int),
 		drainReady:      make(chan int),
@@ -162,41 +157,17 @@ func (c *Conn) String() string {
 	return c.addr
 }
 
-// Read performs a deadlined read on the underlying TCP connection
 func (c *Conn) Read(p []byte) (int, error) {
-	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	return c.r.Read(p)
 }
 
-// Write performs a deadlined write on the underlying TCP connection
 func (c *Conn) Write(p []byte) (int, error) {
-	c.conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
 	return c.w.Write(p)
 }
 
-// WriteCommand is a goroutine safe method to write a Command
-// to this connection, and flush.
-func (c *Conn) WriteCommand(cmd *Command) error {
-	c.mtx.Lock()
-
-	_, err := cmd.WriteTo(c)
-	if err != nil {
-		goto exit
-	}
-	err = c.Flush()
-
-exit:
-	c.mtx.Unlock()
-	if err != nil {
-		c.log(LogLevelError, "IO error - %s", err)
-	}
-	return err
-}
-
-// WriteMessage is a goroutine safe method to write a Message
-// to this connection, and flush.
+// write a Message to this connection, and flush.
 func (c *Conn) WriteMessage(msg Message) error {
-	c.mtx.Lock()
+	c.conn.SetWriteDeadline(time.Now().Add(c.protocol.HeartbeatInterval()))
 
 	err := c.protocol.WriteMessage(c, msg)
 	if err != nil {
@@ -205,7 +176,6 @@ func (c *Conn) WriteMessage(msg Message) error {
 	err = c.Flush()
 
 exit:
-	c.mtx.Unlock()
 	if err != nil {
 		c.log(LogLevelError, "IO error - %s", err)
 	}
@@ -224,22 +194,22 @@ func (c *Conn) Flush() error {
 	return nil
 }
 
-func (c *Conn) SendCommand(cmd *Command) (Message, error) {
-	atomic.AddInt32(&c.concurrentProducers, 1)
+func (c *Conn) SendCommand(req Message) (Message, error) {
+	atomic.AddInt32(&c.concurrentSenders, 1)
 
 	if atomic.LoadInt32(&c.closeFlag) == 1 {
-		atomic.AddInt32(&c.concurrentProducers, -1)
+		atomic.AddInt32(&c.concurrentSenders, -1)
 		return nil, ErrNotConnected
 	}
 
-	doneChan := make(chan *ProducerTransaction)
-	trans := &ProducerTransaction{
-		cmd:      cmd,
+	doneChan := make(chan *cmdTransaction)
+	trans := &cmdTransaction{
+		req:      req,
 		doneChan: doneChan,
 	}
 
 	c.transactionChan <- trans
-	atomic.AddInt32(&c.concurrentProducers, -1)
+	atomic.AddInt32(&c.concurrentSenders, -1)
 
 	t := <-doneChan
 	return t.resp, nil
@@ -258,6 +228,8 @@ func (c *Conn) readLoop() {
 		if atomic.LoadInt32(&c.closeFlag) == 1 {
 			goto exit
 		}
+
+		c.conn.SetReadDeadline(time.Now().Add(c.protocol.HeartbeatInterval() * 2))
 
 		frameType, msg, err := c.protocol.DecodeMessage(c)
 		if err != nil {
@@ -291,6 +263,8 @@ exit:
 }
 
 func (c *Conn) writeLoop() {
+	heartbeatTicker := time.NewTicker(c.protocol.HeartbeatInterval())
+
 	for {
 		select {
 		case <-c.exitChan:
@@ -300,9 +274,9 @@ func (c *Conn) writeLoop() {
 			goto exit
 		case t := <-c.transactionChan:
 			c.transactions = append(c.transactions, t)
-			err := c.WriteCommand(t.cmd)
+			err := c.WriteMessage(t.req)
 			if err != nil {
-				c.log(LogLevelError, "error sending command %s - %s", t.cmd, err)
+				c.log(LogLevelError, "error sending request %s - %s", t.req, err)
 				c.close()
 				continue
 			}
@@ -313,10 +287,23 @@ func (c *Conn) writeLoop() {
 				c.close()
 				continue
 			}
+		case <-heartbeatTicker.C:
+			hb := c.protocol.NewHeartbeatMsg()
+			if hb == nil {
+				continue
+			}
+			err := c.WriteMessage(hb)
+			if err != nil {
+				c.log(LogLevelError, "error sending heartbeat %s - %s", hb, err)
+				c.close()
+				continue
+			}
+			c.log(LogLevelInfo, "sending heartbeat %s", hb)
 		}
 	}
 
 exit:
+	heartbeatTicker.Stop()
 	c.wg.Done()
 	c.log(LogLevelInfo, "writeLoop exiting")
 }
@@ -397,8 +384,8 @@ func (c *Conn) transactionCleanup() {
 			t.resp = nil
 			t.finish()
 		default:
-			// keep spinning until there are 0 concurrent producers
-			if atomic.LoadInt32(&c.concurrentProducers) == 0 {
+			// keep spinning until there are 0 concurrent senders
+			if atomic.LoadInt32(&c.concurrentSenders) == 0 {
 				return
 			}
 			// give the runtime a chance to schedule other racing goroutines

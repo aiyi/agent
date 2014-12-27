@@ -2,6 +2,7 @@ package agentd
 
 import (
 	"io"
+	"time"
 )
 
 // frame types
@@ -106,6 +107,8 @@ type Protocol interface {
 	DecodeMessage(r io.Reader) (int32, Message, error)
 	HandleMessage(msg Message) (resp Message)
 	WriteMessage(w io.Writer, msg Message) error
+	NewHeartbeatMsg() Message
+	HeartbeatInterval() time.Duration
 }
 
 /*

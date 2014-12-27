@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 )
 
 // Error types
@@ -111,4 +112,12 @@ func (this *LtvProtocol) WriteMessage(w io.Writer, msg Message) error {
 	}
 
 	return nil
+}
+
+func (this *LtvProtocol) NewHeartbeatMsg() (hb Message) {
+	return NewLtvMessage(200, []byte("PING"))
+}
+
+func (this *LtvProtocol) HeartbeatInterval() time.Duration {
+	return 5 * time.Second
 }
