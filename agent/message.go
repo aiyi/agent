@@ -1,4 +1,4 @@
-package agentd
+package agent
 
 import (
 	"io"

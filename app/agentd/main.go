@@ -3,7 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/aiyi/agent/agentd"
+	"github.com/aiyi/agent/agent"
+	"github.com/aiyi/agent/rsu"
 	"github.com/aiyi/agent/util"
 	"github.com/mreiferson/go-options"
 	"os"
@@ -28,12 +29,12 @@ func main() {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 
-	opts := agentd.NewAgentdOptions()
+	opts := agent.NewAgentdOptions()
 	options.Resolve(opts, flagset, nil)
-	a := agentd.NewAgentD(opts)
+	a := agent.NewAgentD(opts, &rsu.RsuProtocol{})
 	a.Main()
 
-	r := agentd.NewRestServer(a)
+	r := agent.NewRestServer(a)
 	r.Main()
 
 	<-signalChan

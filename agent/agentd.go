@@ -1,4 +1,4 @@
-package agentd
+package agent
 
 import (
 	"fmt"
@@ -16,7 +16,8 @@ type AgentD struct {
 
 	sync.RWMutex
 
-	opts *AgentdOptions
+	opts     *AgentdOptions
+	protocol Protocol
 
 	tcpAddr     *net.TCPAddr
 	tcpListener net.Listener
@@ -30,9 +31,10 @@ type AgentD struct {
 	logger *log.Logger
 }
 
-func NewAgentD(opts *AgentdOptions) *AgentD {
+func NewAgentD(opts *AgentdOptions, proto Protocol) *AgentD {
 	a := &AgentD{
 		opts:       opts,
+		protocol:   proto,
 		clients:    make(map[string]*Conn),
 		exitChan:   make(chan int),
 		notifyChan: make(chan interface{}),

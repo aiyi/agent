@@ -1,4 +1,4 @@
-package agentd
+package agent
 
 import (
 	"github.com/emicklei/go-restful"

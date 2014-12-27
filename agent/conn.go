@@ -1,4 +1,4 @@
-package agentd
+package agent
 
 import (
 	"bufio"
@@ -106,7 +106,7 @@ func NewConn(a *AgentD, conn net.Conn) *Conn {
 		r:      bufio.NewReader(conn),
 		w:      bufio.NewWriter(conn),
 
-		protocol: &LtvProtocol{},
+		protocol: a.protocol,
 
 		logger: log.New(os.Stderr, "", log.Flags()),
 		logLvl: LogLevelInfo,
