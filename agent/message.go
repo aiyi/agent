@@ -104,6 +104,10 @@ type Message interface {
 }
 
 type Protocol interface {
+	NewProtoInstance() ProtoInstance
+}
+
+type ProtoInstance interface {
 	DecodeMessage(r io.Reader) (int32, Message, error)
 	HandleMessage(msg Message) (resp Message)
 	WriteMessage(w io.Writer, msg Message) error

@@ -73,7 +73,7 @@ type Conn struct {
 	addr string
 	conn *net.TCPConn
 
-	protocol Protocol // data protocol
+	proto ProtoInstance
 
 	logger logger
 	logLvl LogLevel
@@ -101,12 +101,12 @@ type Conn struct {
 func NewConn(a *AgentD, conn net.Conn) *Conn {
 	return &Conn{
 		agentd: a,
-		addr:   conn.RemoteAddr().String(),
+		addr:   strings.Split(conn.RemoteAddr().String(), ":")[0],
 		conn:   conn.(*net.TCPConn),
 		r:      bufio.NewReader(conn),
 		w:      bufio.NewWriter(conn),
 
-		protocol: a.protocol,
+		proto: a.protocol.NewProtoInstance(),
 
 		logger: log.New(os.Stderr, "", log.Flags()),
 		logLvl: LogLevelInfo,
@@ -136,7 +136,7 @@ func (c *Conn) Start() {
 	atomic.StoreInt32(&c.readLoopRunning, 1)
 	go c.readLoop()
 	go c.writeLoop()
-	c.agentd.AddClient(strings.Split(c.addr, ":")[0], c)
+	c.agentd.AddClient(c.addr, c)
 }
 
 // Close idempotently initiates connection close
@@ -152,7 +152,7 @@ func (c *Conn) IsClosing() bool {
 	return atomic.LoadInt32(&c.closeFlag) == 1
 }
 
-// String returns the fully-qualified address
+// String returns the remote address
 func (c *Conn) String() string {
 	return c.addr
 }
@@ -167,9 +167,9 @@ func (c *Conn) Write(p []byte) (int, error) {
 
 // write a Message to this connection, and flush.
 func (c *Conn) WriteMessage(msg Message) error {
-	c.conn.SetWriteDeadline(time.Now().Add(c.protocol.HeartbeatInterval()))
+	c.conn.SetWriteDeadline(time.Now().Add(c.proto.HeartbeatInterval()))
 
-	err := c.protocol.WriteMessage(c, msg)
+	err := c.proto.WriteMessage(c, msg)
 	if err != nil {
 		goto exit
 	}
@@ -229,9 +229,9 @@ func (c *Conn) readLoop() {
 			goto exit
 		}
 
-		c.conn.SetReadDeadline(time.Now().Add(c.protocol.HeartbeatInterval() * 2))
+		c.conn.SetReadDeadline(time.Now().Add(c.proto.HeartbeatInterval() * 2))
 
-		frameType, msg, err := c.protocol.DecodeMessage(c)
+		frameType, msg, err := c.proto.DecodeMessage(c)
 		if err != nil {
 			if !strings.Contains(err.Error(), "use of closed network connection") {
 				c.log(LogLevelError, "IO error - %s", err)
@@ -241,7 +241,7 @@ func (c *Conn) readLoop() {
 
 		switch frameType {
 		case FrameTypeMessage:
-			resp := c.protocol.HandleMessage(msg)
+			resp := c.proto.HandleMessage(msg)
 			if resp != nil {
 				c.msgResponseChan <- resp
 			}
@@ -263,7 +263,7 @@ exit:
 }
 
 func (c *Conn) writeLoop() {
-	heartbeatTicker := time.NewTicker(c.protocol.HeartbeatInterval())
+	heartbeatTicker := time.NewTicker(c.proto.HeartbeatInterval())
 
 	for {
 		select {
@@ -288,7 +288,7 @@ func (c *Conn) writeLoop() {
 				continue
 			}
 		case <-heartbeatTicker.C:
-			hb := c.protocol.NewHeartbeatMsg()
+			hb := c.proto.NewHeartbeatMsg()
 			if hb == nil {
 				continue
 			}
@@ -298,7 +298,7 @@ func (c *Conn) writeLoop() {
 				c.close()
 				continue
 			}
-			c.log(LogLevelInfo, "sending heartbeat %s", hb)
+			c.log(LogLevelInfo, "sending heartbeat")
 		}
 	}
 
@@ -328,7 +328,7 @@ func (c *Conn) close() {
 	//            and cleanup goroutine)
 	//         c. underlying TCP connection close
 	//
-	c.agentd.RemoveClient(strings.Split(c.addr, ":")[0])
+	c.agentd.RemoveClient(c.addr)
 
 	c.stopper.Do(func() {
 		c.log(LogLevelInfo, "beginning close")

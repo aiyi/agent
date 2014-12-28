@@ -8,7 +8,7 @@ import (
 )
 
 type Rsu struct {
-	Ip, Name string
+	IP string
 }
 
 type RsuService struct {
@@ -25,17 +25,17 @@ func (u RsuService) Register() {
 
 	ws.Route(ws.GET("/").To(u.findOnlineRsu).
 		// docs
-		Doc("get all connected RSU").
+		Doc("Get all connected RSU").
 		Operation("findOnlineRsu").
 		Returns(200, "OK", []Rsu{}))
-
-	ws.Route(ws.GET("/{IP}").To(u.queryPara).
-		// docs
-		Doc("get parameters of RSU").
-		Operation("queryPara").
-		Param(ws.PathParameter("IP", "IP Address").DataType("string")).
-		Writes(Rsu{})) // on the response
-
+	/*
+		ws.Route(ws.GET("/{IP}").To(u.queryPara).
+			// docs
+			Doc("get parameters of RSU").
+			Operation("queryPara").
+			Param(ws.PathParameter("IP", "IP Address").DataType("string")).
+			Writes(Rsu{})) // on the response
+	*/
 	restful.Add(ws)
 }
 
@@ -46,8 +46,7 @@ func (u RsuService) findOnlineRsu(request *restful.Request, response *restful.Re
 	a.RLock()
 	for _, c := range a.clients {
 		rsu := &Rsu{
-			Ip:   c.addr,
-			Name: c.addr,
+			IP: c.addr,
 		}
 		rsus = append(rsus, rsu)
 	}
@@ -67,8 +66,7 @@ func (u RsuService) queryPara(request *restful.Request, response *restful.Respon
 	}
 
 	rsu := new(Rsu)
-	rsu.Ip = ip
-	rsu.Name = c.addr
+	rsu.IP = c.addr
 	response.WriteEntity(rsu)
 }
 
