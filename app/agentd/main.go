@@ -34,7 +34,7 @@ func main() {
 	a := agent.NewAgentD(opts, &rsu.RsuProtocol{})
 	a.Main()
 
-	r := agent.NewRestServer(a)
+	r := rsu.NewRestServer(a)
 	r.Main()
 
 	<-signalChan

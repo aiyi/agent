@@ -22,7 +22,7 @@ type AgentD struct {
 	tcpAddr     *net.TCPAddr
 	tcpListener net.Listener
 
-	clients map[string]*Conn
+	Clients map[string]*Conn
 
 	notifyChan chan interface{}
 	exitChan   chan int
@@ -35,7 +35,7 @@ func NewAgentD(opts *AgentdOptions, proto Protocol) *AgentD {
 	a := &AgentD{
 		opts:       opts,
 		protocol:   proto,
-		clients:    make(map[string]*Conn),
+		Clients:    make(map[string]*Conn),
 		exitChan:   make(chan int),
 		notifyChan: make(chan interface{}),
 		logger:     log.New(os.Stderr, "[agentd] ", log.Ldate|log.Ltime|log.Lmicroseconds),
@@ -59,29 +59,29 @@ func (a *AgentD) AddClient(clientID string, client *Conn) {
 	a.Lock()
 	defer a.Unlock()
 
-	_, ok := a.clients[clientID]
+	_, ok := a.Clients[clientID]
 	if ok {
 		return
 	}
-	a.clients[clientID] = client
+	a.Clients[clientID] = client
 }
 
 func (a *AgentD) RemoveClient(clientID string) {
 	a.Lock()
 	defer a.Unlock()
 
-	_, ok := a.clients[clientID]
+	_, ok := a.Clients[clientID]
 	if !ok {
 		return
 	}
-	delete(a.clients, clientID)
+	delete(a.Clients, clientID)
 }
 
 func (a *AgentD) GetClient(clientID string) (*Conn, bool) {
 	a.RLock()
 	defer a.RUnlock()
 
-	c, ok := a.clients[clientID]
+	c, ok := a.Clients[clientID]
 	if !ok {
 		return nil, false
 	}

@@ -9,6 +9,8 @@ import (
 // against a Producer that is not connected
 var ErrNotConnected = errors.New("not connected")
 
+var ErrInvalidResponse = errors.New("invalid response")
+
 // ErrStopped is returned when a publish command is
 // made against a Producer that has been stopped
 var ErrStopped = errors.New("stopped")

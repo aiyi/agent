@@ -157,6 +157,10 @@ func (c *Conn) String() string {
 	return c.addr
 }
 
+func (c *Conn) ProtoInstance() ProtoInstance {
+	return c.proto
+}
+
 func (c *Conn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
@@ -212,6 +216,9 @@ func (c *Conn) SendCommand(req Message) (Message, error) {
 	atomic.AddInt32(&c.concurrentSenders, -1)
 
 	t := <-doneChan
+	if t.resp == nil {
+		return nil, ErrInvalidResponse
+	}
 	return t.resp, nil
 }
 
@@ -298,7 +305,6 @@ func (c *Conn) writeLoop() {
 				c.close()
 				continue
 			}
-			c.log(LogLevelInfo, "sending heartbeat")
 		}
 	}
 
