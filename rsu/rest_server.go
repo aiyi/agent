@@ -2,11 +2,14 @@ package rsu
 
 import (
 	. "github.com/aiyi/agent/agent"
+	iconv "github.com/djimenez/iconv-go"
 	rest "github.com/emicklei/go-restful"
 	"github.com/emicklei/go-restful/swagger"
 	"log"
 	"net/http"
 )
+
+var Iconv *iconv.Converter
 
 type RsuInfo struct {
 	IP string
@@ -79,7 +82,7 @@ func (u RsuService) getTxPower(request *rest.Request, response *rest.Response) {
 	}
 
 	ent := new(TxPower)
-	ent.TxPower = resp.(*RsuMessage).TxPower()
+	ent.TxPower = resp.(*RsuMessage).GetTxPower()
 	response.WriteEntity(ent)
 }
 
@@ -107,7 +110,7 @@ func (u RsuService) setTxPower(request *rest.Request, response *rest.Response) {
 		return
 	}
 
-	if resp.(*RsuMessage).RsuStatus() != 0 {
+	if resp.(*RsuMessage).GetRsuStatus() != 0 {
 		response.WriteError(http.StatusExpectationFailed, SetParameterError)
 		return
 	}
@@ -152,6 +155,8 @@ func (r *RestServer) Main() {
 	swagger.InstallSwaggerService(config)
 
 	go restServer(r)
+
+	Iconv, _ = iconv.NewConverter("gb2312", "utf-8")
 }
 
 func (r *RestServer) Exit() {

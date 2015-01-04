@@ -1,7 +1,7 @@
 package rsu
 
 import (
-	//"encoding/binary"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	. "github.com/aiyi/agent/agent"
@@ -12,6 +12,7 @@ import (
 // Error types
 var (
 	ReadPacketError     = errors.New("read packet error")
+	InvalidPacketError  = errors.New("invalid packet")
 	MessageUnknownError = errors.New("unknown message type")
 	RsuNotFoundError    = errors.New("RSU not found")
 	SetParameterError   = errors.New("set parameter error")
@@ -27,6 +28,8 @@ const (
 
 	SetTxPowerRequest  uint16 = 0xD06F
 	SetTxPowerResponse uint16 = 0xC06F
+
+	ObuEventReport uint16 = 0xC465
 )
 
 type RsuMessage struct {
@@ -35,20 +38,85 @@ type RsuMessage struct {
 	data    []byte
 }
 
-func NewRsuMessage(msgId uint8, msgType uint16, data []byte) *RsuMessage {
-	return &RsuMessage{
-		msgId:   msgId,
-		msgType: msgType,
-		data:    data,
+func (m *RsuMessage) readNBytes(offset int, n int) ([]byte, int) {
+	buf := m.data[offset : offset+n]
+	numFE := 0
+
+	for i := 0; i < n; i++ {
+		if buf[i] == 0xFE {
+			numFE++
+		}
 	}
+
+	if numFE == 0 {
+		return buf, offset + n
+	}
+
+	b := make([]byte, n)
+	n += numFE
+	buf = m.data[offset : offset+n]
+	i := 0
+	for k := 0; k < n; k++ {
+		if buf[k] != 0xFE {
+			b[i] = buf[k]
+		} else {
+			b[i] = buf[k] + buf[k+1]
+			k++
+		}
+		i++
+	}
+	return b, offset + n
 }
 
-func (m *RsuMessage) TxPower() uint8 {
+func (m *RsuMessage) GetTxPower() uint8 {
 	return m.data[0]
 }
 
-func (m *RsuMessage) RsuStatus() uint8 {
+func (m *RsuMessage) GetRsuStatus() uint8 {
 	return m.data[0]
+}
+
+type ObuEvent struct {
+	//RsuTransactionMode uint8
+	VehicleNumber string
+	VehicleType   uint8
+	UserType      uint8
+	//ContractSN    [8]byte
+	ObuMAC string
+	//ObuStatus     [2]byte
+	Battery   uint8
+	Timestamp int64
+	//PSAMID        [6]byte
+	//TrSN          [4]byte
+	Station uint16
+	Roadway uint8
+}
+
+func (m *RsuMessage) GetObuEvent() *ObuEvent {
+	e := &ObuEvent{}
+	var b []byte
+
+	_, offset := m.readNBytes(0, 1)
+	b, offset = m.readNBytes(offset, 12)
+	e.VehicleNumber, _ = Iconv.ConvertString(string(b))
+	b, offset = m.readNBytes(offset, 1)
+	e.VehicleType = b[0]
+	b, offset = m.readNBytes(offset, 1)
+	e.UserType = b[0]
+	_, offset = m.readNBytes(offset, 8)
+	b, offset = m.readNBytes(offset, 4)
+	e.ObuMAC = fmt.Sprintf("%02x:%02x:%02x:%02x", b[0], b[1], b[2], b[3])
+	b, offset = m.readNBytes(offset, 3)
+	e.Battery = b[2]
+	b, offset = m.readNBytes(offset, 4)
+	e.Timestamp = int64(binary.BigEndian.Uint32(b[:]))
+	_, offset = m.readNBytes(offset, 6)
+	_, offset = m.readNBytes(offset, 4)
+	b, offset = m.readNBytes(offset, 2)
+	e.Station = binary.BigEndian.Uint16(b[:])
+	b, offset = m.readNBytes(offset, 1)
+	e.Roadway = b[0]
+	return e
 }
 
 func GetBCC(buf []byte) uint8 {
@@ -70,7 +138,13 @@ func (m *RsuMessage) Bytes() []byte {
 	b = append(b, uint8((m.msgType&0xFF00)>>8))
 	b = append(b, uint8(m.msgType&0x00FF))
 	b = append(b, m.data...)
-	b = append(b, GetBCC(b[:]))
+	bcc := GetBCC(b[:])
+	if bcc > 0xFD {
+		b = append(b, 0xFE)
+		b = append(b, bcc-0xFE)
+	} else {
+		b = append(b, bcc)
+	}
 	b = append(b, 0xFF)
 	return b
 }
@@ -79,49 +153,67 @@ type RsuProtocol struct {
 }
 
 func (this *RsuProtocol) NewProtoInstance() ProtoInstance {
-	return &RsuProtoInst{
-		seq: 0,
+	inst := &RsuProtoInst{
+		seqChan: make(chan uint8, 8),
 	}
+	for i := 0; i < 8; i++ {
+		inst.seqChan <- uint8(i)
+	}
+
+	return inst
 }
 
 type RsuProtoInst struct {
-	seq uint8
+	seqChan chan uint8
+	hdr     [5]byte
+	bcc     [1]byte
+	end     [1]byte
 }
 
-func (p *RsuProtoInst) genMsgId() uint8 {
-	id := p.seq
-	p.seq++
-	if p.seq == 8 {
-		p.seq = 9
-	} else if p.seq > 9 {
-		p.seq = 0
-	}
+func (p *RsuProtoInst) msgId() uint8 {
+	id := <-p.seqChan
+	p.seqChan <- id
 	return id
+}
+
+func (p *RsuProtoInst) NewRsuMessage(msgType uint16, data []byte) *RsuMessage {
+	return &RsuMessage{
+		msgId:   p.msgId(),
+		msgType: msgType,
+		data:    data,
+	}
 }
 
 func (p *RsuProtoInst) DecodeMessage(r io.Reader) (int32, Message, error) {
 	var (
 		m         RsuMessage
-		hdr       []byte = make([]byte, 5)
-		end       []byte = make([]byte, 2)
-		dataLen   int32
+		dataLen   int
+		numFE     int
 		frameType int32
 	)
 
-	_, err := io.ReadFull(r, hdr)
+	_, err := io.ReadFull(r, p.hdr[:])
 	if err != nil {
-		fmt.Println("Read message header error")
+		fmt.Println("Read header error")
 		return -1, nil, ReadPacketError
 	}
+	if p.hdr[0] != 0xFF || p.hdr[1] != 0xFF {
+		fmt.Println("Invalid STX")
+		return -1, nil, InvalidPacketError
+	}
 
-	m.msgId = hdr[2]
-	m.msgType = uint16(hdr[3])<<8 | uint16(hdr[4])
+	m.msgId = p.hdr[2]
+	m.msgType = uint16(p.hdr[3])<<8 | uint16(p.hdr[4])
 
 	switch m.msgType {
 	case HeartbeatResponse:
 		dataLen = 1
 		frameType = FrameTypeMessage
 		fmt.Printf("Heartbeat <- ")
+	case ObuEventReport:
+		dataLen = 65
+		frameType = FrameTypeMessage
+		fmt.Printf("OBU Event <- ")
 	case GetTxPowerResponse:
 		dataLen = 1
 		frameType = FrameTypeResponse
@@ -131,29 +223,68 @@ func (p *RsuProtoInst) DecodeMessage(r io.Reader) (int32, Message, error) {
 		frameType = FrameTypeResponse
 		fmt.Printf("Set TxPower <- ")
 	default:
-		fmt.Printf("Unknown message type(%x)\n", hdr[3:])
+		fmt.Printf("Unknown message type(%x)\n", p.hdr[3:])
 		return -1, nil, MessageUnknownError
 	}
 
-	fmt.Printf("%x", hdr)
+	fmt.Printf("%x", p.hdr)
 
 	if dataLen > 0 {
 		data := make([]byte, dataLen)
 		_, err = io.ReadFull(r, data)
 		if err != nil {
-			fmt.Println("Read message payload error")
+			fmt.Println("Read payload error")
 			return -1, nil, ReadPacketError
 		}
 		m.data = data[:]
-		fmt.Printf("%x", data)
+
+	moredata:
+		numFE = 0
+		for i := 0; i < dataLen; i++ {
+			if data[i] == 0xFE {
+				numFE++
+			}
+		}
+		if numFE > 0 {
+			dataLen = numFE
+			data = make([]byte, dataLen)
+			_, err = io.ReadFull(r, data)
+			if err != nil {
+				fmt.Println("Read payload error")
+				return -1, nil, ReadPacketError
+			}
+			m.data = append(m.data, data...)
+			goto moredata
+		}
+
+		fmt.Printf("%x", m.data)
 	}
 
-	_, err = io.ReadFull(r, end)
+	_, err = io.ReadFull(r, p.bcc[:])
 	if err != nil {
-		fmt.Println("Read message trailer error")
+		fmt.Println("Read BCC error")
 		return -1, nil, ReadPacketError
 	}
-	fmt.Printf("%x\n", end)
+	fmt.Printf("%x", p.bcc)
+	if p.bcc[0] == 0xFE {
+		_, err = io.ReadFull(r, p.bcc[:])
+		if err != nil {
+			fmt.Println("Read BCC error")
+			return -1, nil, ReadPacketError
+		}
+		fmt.Printf("%x", p.bcc)
+	}
+
+	_, err = io.ReadFull(r, p.end[:])
+	if err != nil {
+		fmt.Println("Read ETX error")
+		return -1, nil, ReadPacketError
+	}
+	fmt.Printf("%x\n", p.end)
+	if p.end[0] != 0xFF {
+		fmt.Println("Invalid ETX")
+		return -1, nil, InvalidPacketError
+	}
 
 	return frameType, &m, nil
 }
@@ -164,6 +295,10 @@ func (p *RsuProtoInst) HandleMessage(msg Message) Message {
 	switch m.msgType {
 	case HeartbeatResponse:
 		// do nothing
+	case ObuEventReport:
+		e := m.GetObuEvent()
+		fmt.Println(time.Unix(0, e.Timestamp))
+		fmt.Println(e)
 	}
 
 	return nil
@@ -197,17 +332,17 @@ func (p *RsuProtoInst) WriteMessage(w io.Writer, msg Message) error {
 }
 
 func (p *RsuProtoInst) NewGetTxPowerMsg() Message {
-	return NewRsuMessage(p.genMsgId(), GetTxPowerRequest, nil)
+	return p.NewRsuMessage(GetTxPowerRequest, nil)
 }
 
 func (p *RsuProtoInst) NewSetTxPowerMsg(txPower uint8) Message {
 	data := make([]byte, 1)
 	data[0] = txPower
-	return NewRsuMessage(p.genMsgId(), SetTxPowerRequest, data)
+	return p.NewRsuMessage(SetTxPowerRequest, data)
 }
 
 func (p *RsuProtoInst) NewHeartbeatMsg() Message {
-	return NewRsuMessage(p.genMsgId(), HeartbeatRequest, nil)
+	return p.NewRsuMessage(HeartbeatRequest, nil)
 }
 
 func (p *RsuProtoInst) HeartbeatInterval() time.Duration {
