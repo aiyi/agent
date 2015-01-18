@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	kafka "github.com/Shopify/sarama"
 	"github.com/aiyi/agent/util"
 	"log"
 	"net"
@@ -23,6 +24,9 @@ type AgentD struct {
 	tcpListener net.Listener
 
 	Clients map[string]*Conn
+
+	kafkaClient   *kafka.Client
+	KafkaProducer *kafka.SimpleProducer
 
 	notifyChan chan interface{}
 	exitChan   chan int
@@ -47,6 +51,22 @@ func NewAgentD(opts *AgentdOptions, proto Protocol) *AgentD {
 		os.Exit(1)
 	}
 	a.tcpAddr = tcpAddr
+
+	kafkaClient, err := kafka.NewClient("agentd", []string{"localhost:9092"}, kafka.NewClientConfig())
+	if err != nil {
+		a.logf("FATAL: failed to create kafka client - %s", err)
+		os.Exit(1)
+	}
+
+	kafkaProducer, err := kafka.NewSimpleProducer(kafkaClient, "obu_event", nil)
+	if err != nil {
+		a.logf("FATAL: failed to create kafka producer - %s", err)
+		kafkaClient.Close()
+		os.Exit(1)
+	}
+
+	a.kafkaClient = kafkaClient
+	a.KafkaProducer = kafkaProducer
 
 	return a
 }
@@ -105,6 +125,9 @@ func (a *AgentD) Exit() {
 	if a.tcpListener != nil {
 		a.tcpListener.Close()
 	}
+
+	a.KafkaProducer.Close()
+	a.kafkaClient.Close()
 
 	// we want to do this last as it closes the idPump (if closed first it
 	// could potentially starve items in process and deadlock)

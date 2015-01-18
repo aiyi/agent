@@ -106,7 +106,7 @@ func NewConn(a *AgentD, conn net.Conn) *Conn {
 		r:      bufio.NewReader(conn),
 		w:      bufio.NewWriter(conn),
 
-		proto: a.protocol.NewProtoInstance(),
+		proto: a.protocol.NewProtoInstance(a),
 
 		logger: log.New(os.Stderr, "", log.Flags()),
 		logLvl: LogLevelInfo,

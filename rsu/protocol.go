@@ -2,10 +2,13 @@ package rsu
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	kafka "github.com/Shopify/sarama"
 	. "github.com/aiyi/agent/agent"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -99,6 +102,7 @@ func (m *RsuMessage) GetObuEvent() *ObuEvent {
 	_, offset := m.readNBytes(0, 1)
 	b, offset = m.readNBytes(offset, 12)
 	e.VehicleNumber, _ = Iconv.ConvertString(string(b))
+	e.VehicleNumber = strings.TrimRight(e.VehicleNumber, "\u0000")
 	b, offset = m.readNBytes(offset, 1)
 	e.VehicleType = b[0]
 	b, offset = m.readNBytes(offset, 1)
@@ -152,8 +156,9 @@ func (m *RsuMessage) Bytes() []byte {
 type RsuProtocol struct {
 }
 
-func (this *RsuProtocol) NewProtoInstance() ProtoInstance {
+func (this *RsuProtocol) NewProtoInstance(a *AgentD) ProtoInstance {
 	inst := &RsuProtoInst{
+		agentd:  a,
 		seqChan: make(chan uint8, 8),
 	}
 	for i := 0; i < 8; i++ {
@@ -164,6 +169,7 @@ func (this *RsuProtocol) NewProtoInstance() ProtoInstance {
 }
 
 type RsuProtoInst struct {
+	agentd  *AgentD
 	seqChan chan uint8
 	hdr     [5]byte
 	bcc     [1]byte
@@ -296,9 +302,16 @@ func (p *RsuProtoInst) HandleMessage(msg Message) Message {
 	case HeartbeatResponse:
 		// do nothing
 	case ObuEventReport:
-		e := m.GetObuEvent()
-		fmt.Println(time.Unix(0, e.Timestamp))
-		fmt.Println(e)
+		event := m.GetObuEvent()
+		buf, _ := json.Marshal(event)
+		fmt.Println(time.Unix(event.Timestamp, 0))
+		fmt.Println(string(buf))
+		err := p.agentd.KafkaProducer.SendMessage(nil, kafka.StringEncoder(buf))
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			fmt.Println("> message sent to broker")
+		}
 	}
 
 	return nil

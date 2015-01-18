@@ -15,7 +15,7 @@ type Message interface {
 }
 
 type Protocol interface {
-	NewProtoInstance() ProtoInstance
+	NewProtoInstance(a *AgentD) ProtoInstance
 }
 
 type ProtoInstance interface {
