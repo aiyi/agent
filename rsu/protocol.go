@@ -26,11 +26,32 @@ const (
 	HeartbeatRequest  uint16 = 0xD468
 	HeartbeatResponse uint16 = 0xC468
 
+	OpenAntRequest  uint16 = 0xF065
+	OpenAntResponse uint16 = 0xE065
+
+	CloseAntRequest  uint16 = 0xF066
+	CloseAntResponse uint16 = 0xE066
+
+	GetStaRoadRequest  uint16 = 0xD367
+	GetStaRoadResponse uint16 = 0xC367
+
+	GetChannelRequest  uint16 = 0xD370
+	GetChannelResponse uint16 = 0xC370
+
 	GetTxPowerRequest  uint16 = 0xD371
 	GetTxPowerResponse uint16 = 0xC371
 
+	GetRevSensitiveRequest  uint16 = 0xD372
+	GetRevSensitiveResponse uint16 = 0xC372
+
+	SetStaRoadRequest  uint16 = 0xD067
+	SetStaRoadResponse uint16 = 0xC067
+
 	SetTxPowerRequest  uint16 = 0xD06F
 	SetTxPowerResponse uint16 = 0xC06F
+
+	SetRevSensitiveRequest  uint16 = 0xD070
+	SetRevSensitiveResponse uint16 = 0xC070
 
 	ObuEventReport uint16 = 0xC465
 )
@@ -75,7 +96,23 @@ func (m *RsuMessage) GetTxPower() uint8 {
 	return m.data[0]
 }
 
+func (m *RsuMessage) GetRevSensitive() uint8 {
+	return m.data[0]
+}
+
 func (m *RsuMessage) GetRsuStatus() uint8 {
+	return m.data[0]
+}
+
+func (m *RsuMessage) GetStation() uint16 {
+	return binary.BigEndian.Uint16(m.data[0:2])
+}
+
+func (m *RsuMessage) GetRoadway() uint8 {
+	return m.data[2]
+}
+
+func (m *RsuMessage) GetChannel() uint8 {
 	return m.data[0]
 }
 
@@ -220,14 +257,42 @@ func (p *RsuProtoInst) DecodeMessage(r io.Reader) (int32, Message, error) {
 		dataLen = 65
 		frameType = FrameTypeMessage
 		fmt.Printf("OBU Event <- ")
+	case OpenAntResponse:
+		dataLen = 1
+		frameType = FrameTypeResponse
+		fmt.Printf("Open Antenna <- ")
+	case CloseAntResponse:
+		dataLen = 1
+		frameType = FrameTypeResponse
+		fmt.Printf("Close Antenna <- ")
+	case GetStaRoadResponse:
+		dataLen = 3
+		frameType = FrameTypeResponse
+		fmt.Printf("Get Station/Roadway <- ")
+	case GetChannelResponse:
+		dataLen = 1
+		frameType = FrameTypeResponse
+		fmt.Printf("Get Channel <- ")
 	case GetTxPowerResponse:
 		dataLen = 1
 		frameType = FrameTypeResponse
 		fmt.Printf("Get TxPower <- ")
+	case GetRevSensitiveResponse:
+		dataLen = 1
+		frameType = FrameTypeResponse
+		fmt.Printf("Get RevSensitive <- ")
+	case SetStaRoadResponse:
+		dataLen = 1
+		frameType = FrameTypeResponse
+		fmt.Printf("Set Station/Roadway <- ")
 	case SetTxPowerResponse:
 		dataLen = 1
 		frameType = FrameTypeResponse
 		fmt.Printf("Set TxPower <- ")
+	case SetRevSensitiveResponse:
+		dataLen = 1
+		frameType = FrameTypeResponse
+		fmt.Printf("Set RevSensitive <- ")
 	default:
 		fmt.Printf("Unknown message type(%x)\n", p.hdr[3:])
 		return -1, nil, MessageUnknownError
@@ -323,10 +388,24 @@ func (p *RsuProtoInst) WriteMessage(w io.Writer, msg Message) error {
 	switch m.msgType {
 	case HeartbeatRequest:
 		fmt.Printf("Heartbeat -> ")
+	case OpenAntRequest:
+		fmt.Printf("Open Antenna -> ")
+	case CloseAntRequest:
+		fmt.Printf("Close Antenna -> ")
+	case GetStaRoadRequest:
+		fmt.Printf("Get Station/Roadway -> ")
+	case GetChannelRequest:
+		fmt.Printf("Get Channel -> ")
 	case GetTxPowerRequest:
 		fmt.Printf("Get TxPower -> ")
+	case GetRevSensitiveRequest:
+		fmt.Printf("Get RevSensitive -> ")
+	case SetStaRoadRequest:
+		fmt.Printf("Set Station/Roadway -> ")
 	case SetTxPowerRequest:
 		fmt.Printf("Set TxPower -> ")
+	case SetRevSensitiveRequest:
+		fmt.Printf("Set RevSensitive -> ")
 	default:
 		fmt.Println("Error sending unknown message type")
 		return MessageUnknownError
@@ -344,14 +423,47 @@ func (p *RsuProtoInst) WriteMessage(w io.Writer, msg Message) error {
 	return nil
 }
 
+func (p *RsuProtoInst) NewOpenAntMsg() Message {
+	return p.NewRsuMessage(OpenAntRequest, nil)
+}
+
+func (p *RsuProtoInst) NewCloseAntMsg() Message {
+	return p.NewRsuMessage(CloseAntRequest, nil)
+}
+
+func (p *RsuProtoInst) NewGetStaRoadMsg() Message {
+	return p.NewRsuMessage(GetStaRoadRequest, nil)
+}
+
+func (p *RsuProtoInst) NewGetChannelMsg() Message {
+	return p.NewRsuMessage(GetChannelRequest, nil)
+}
+
 func (p *RsuProtoInst) NewGetTxPowerMsg() Message {
 	return p.NewRsuMessage(GetTxPowerRequest, nil)
+}
+
+func (p *RsuProtoInst) NewGetRevSensitiveMsg() Message {
+	return p.NewRsuMessage(GetRevSensitiveRequest, nil)
+}
+
+func (p *RsuProtoInst) NewSetStaRoadMsg(station uint16, road uint8) Message {
+	data := make([]byte, 3)
+	binary.BigEndian.PutUint16(data[0:2], station)
+	data[2] = road
+	return p.NewRsuMessage(SetStaRoadRequest, nil)
 }
 
 func (p *RsuProtoInst) NewSetTxPowerMsg(txPower uint8) Message {
 	data := make([]byte, 1)
 	data[0] = txPower
 	return p.NewRsuMessage(SetTxPowerRequest, data)
+}
+
+func (p *RsuProtoInst) NewSetRevSensitiveMsg(revSensitive uint8) Message {
+	data := make([]byte, 1)
+	data[0] = revSensitive
+	return p.NewRsuMessage(SetRevSensitiveRequest, data)
 }
 
 func (p *RsuProtoInst) NewHeartbeatMsg() Message {
