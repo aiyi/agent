@@ -484,5 +484,5 @@ func (p *RsuProtoInst) NewHeartbeatMsg() Message {
 }
 
 func (p *RsuProtoInst) HeartbeatInterval() time.Duration {
-	return 5 * time.Second
+	return 1 * time.Second
 }
