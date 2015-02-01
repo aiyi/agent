@@ -31,13 +31,14 @@ func main() {
 
 	opts := agent.NewAgentdOptions()
 	options.Resolve(opts, flagset, nil)
+
 	a := agent.NewAgentD(opts, &rsu.RsuProtocol{})
+	r := rsu.NewRestServer(a)
+	
+	r.Main()
 	a.Main()
 
-	r := rsu.NewRestServer(a)
-	r.Main()
-
 	<-signalChan
-	r.Exit()
 	a.Exit()
+	r.Exit()
 }

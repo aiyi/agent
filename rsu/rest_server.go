@@ -2,14 +2,18 @@ package rsu
 
 import (
 	. "github.com/aiyi/agent/agent"
-	iconv "github.com/djimenez/iconv-go"
+	"github.com/djimenez/iconv-go"
 	rest "github.com/emicklei/go-restful"
 	"github.com/emicklei/go-restful/swagger"
 	"log"
 	"net/http"
+	"os"
 )
 
-var Iconv *iconv.Converter
+var (
+	db   *Tsdb
+	conv *iconv.Converter
+)
 
 type RsuInfo struct {
 	IP string
@@ -321,6 +325,15 @@ type RestServer struct {
 }
 
 func NewRestServer(a *AgentD) *RestServer {
+	db := NewTsdb()
+	err := db.Init()
+	if err != nil {
+		log.Fatal("FATAL: failed to connect to database - %s", err)
+		os.Exit(1)
+	}
+
+	conv, _ = iconv.NewConverter("gb2312", "utf-8")
+
 	r := &RestServer{
 		agentd: a,
 	}
@@ -353,10 +366,10 @@ func (r *RestServer) Main() {
 	swagger.InstallSwaggerService(config)
 
 	go restServer(r)
-
-	Iconv, _ = iconv.NewConverter("gb2312", "utf-8")
 }
 
 func (r *RestServer) Exit() {
-
+	if db != nil {
+		db.Exit()
+	}
 }

@@ -116,20 +116,27 @@ func (m *RsuMessage) GetChannel() uint8 {
 	return m.data[0]
 }
 
+//RsuTransactionMode	1
+//VehicleNumber			12
+//VehicleType			1
+//UserType				1
+//ContractSN			8
+//ObuMAC				4
+//ObuStatus				2
+//Battery				1
+//Timestamp				4
+//PSAMID				6
+//TrSN					4
+//Station				2
+//Roadway				1
 type ObuEvent struct {
-	//RsuTransactionMode uint8
+	Timestamp     int64
+	Station       uint16
+	Roadway       uint8
 	VehicleNumber string
+	ObuMAC        string
 	VehicleType   uint8
 	UserType      uint8
-	//ContractSN    [8]byte
-	ObuMAC string
-	//ObuStatus     [2]byte
-	Battery   uint8
-	Timestamp int64
-	//PSAMID        [6]byte
-	//TrSN          [4]byte
-	Station uint16
-	Roadway uint8
 }
 
 func (m *RsuMessage) GetObuEvent() *ObuEvent {
@@ -138,7 +145,7 @@ func (m *RsuMessage) GetObuEvent() *ObuEvent {
 
 	_, offset := m.readNBytes(0, 1)
 	b, offset = m.readNBytes(offset, 12)
-	e.VehicleNumber, _ = Iconv.ConvertString(string(b))
+	e.VehicleNumber, _ = conv.ConvertString(string(b))
 	e.VehicleNumber = strings.TrimRight(e.VehicleNumber, "\u0000")
 	b, offset = m.readNBytes(offset, 1)
 	e.VehicleType = b[0]
@@ -147,8 +154,8 @@ func (m *RsuMessage) GetObuEvent() *ObuEvent {
 	_, offset = m.readNBytes(offset, 8)
 	b, offset = m.readNBytes(offset, 4)
 	e.ObuMAC = fmt.Sprintf("%02x:%02x:%02x:%02x", b[0], b[1], b[2], b[3])
-	b, offset = m.readNBytes(offset, 3)
-	e.Battery = b[2]
+	_, offset = m.readNBytes(offset, 3)
+	//e.Battery = b[2]
 	b, offset = m.readNBytes(offset, 4)
 	e.Timestamp = int64(binary.BigEndian.Uint32(b[:]))
 	_, offset = m.readNBytes(offset, 6)
@@ -376,6 +383,12 @@ func (p *RsuProtoInst) HandleMessage(msg Message) Message {
 			fmt.Println(err)
 		} else {
 			fmt.Println("> message sent to broker")
+		}
+		err = db.WriteObuEvent(event)
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			fmt.Println("> message stored in db")
 		}
 	}
 
