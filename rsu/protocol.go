@@ -56,6 +56,8 @@ const (
 	ObuEventReport uint16 = 0xC465
 )
 
+var HBInterval uint32 = 5
+
 type RsuMessage struct {
 	msgId   uint8
 	msgType uint16
@@ -484,5 +486,5 @@ func (p *RsuProtoInst) NewHeartbeatMsg() Message {
 }
 
 func (p *RsuProtoInst) HeartbeatInterval() time.Duration {
-	return 1 * time.Second
+	return time.Duration(HBInterval) * time.Second
 }

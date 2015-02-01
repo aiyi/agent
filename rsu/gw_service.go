@@ -3,7 +3,12 @@ package rsu
 import (
 	. "github.com/aiyi/agent/agent"
 	rest "github.com/emicklei/go-restful"
+	"net/http"
 )
+
+type Heartbeat struct {
+	Interval int
+}
 
 type GwService struct {
 	agentd *AgentD
@@ -31,6 +36,11 @@ func (s GwService) Register() {
 		Param(ws.QueryParameter("VehicleNumber", "车牌号码").DataType("string")).
 		Param(ws.QueryParameter("Tags", "标签(tag1,tag2)").DataType("string")).
 		Returns(200, "OK", []EventDoc{}))
+
+	ws.Route(ws.PUT("/Heartbeat").To(s.setHeartbeatInterval).
+		Doc("设置心跳消息间隔").
+		Operation("setHeartbeatInterval").
+		Reads(Heartbeat{}))
 
 	rest.Add(ws)
 }
@@ -63,4 +73,20 @@ func (s GwService) getObuEvent(request *rest.Request, response *rest.Response) {
 	db.FindObuEvent(from, to, station, roadway, vehicle, tags, events)
 
 	response.WriteEntity(events)
+}
+
+func (s GwService) setHeartbeatInterval(request *rest.Request, response *rest.Response) {
+	ent := new(Heartbeat)
+	err := request.ReadEntity(&ent)
+	if err != nil {
+		response.WriteError(http.StatusInternalServerError, err)
+		return
+	}
+	if ent.Interval <= 0 {
+		response.WriteError(http.StatusExpectationFailed, SetParameterError)
+		return
+	}
+
+	HBInterval = uint32(ent.Interval)
+	response.WriteEntity(ent)
 }
