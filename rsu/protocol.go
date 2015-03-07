@@ -380,13 +380,26 @@ func (p *RsuProtoInst) HandleMessage(msg Message) Message {
 		buf, _ := json.Marshal(event)
 		fmt.Println(time.Unix(event.Timestamp, 0))
 		fmt.Println(string(buf))
-		err := p.agentd.KafkaProducer.SendMessage(nil, kafka.StringEncoder(buf))
-		if err != nil {
+
+		msg := &kafka.MessageToSend{Topic: "obu_event", Key: nil, Value: kafka.StringEncoder(buf)}
+		select {
+		case p.agentd.KafkaProducer.Input() <- msg:
+			fmt.Println("> message queued to broker (topic: obu_event)")
+		case err := <-p.agentd.KafkaProducer.Errors():
 			fmt.Println(err)
-		} else {
-			fmt.Println("> message sent to broker")
 		}
-		err = db.WriteObuEvent(event)
+
+		if db.TargetIsLocated(event.ObuMAC) {
+			msg.Topic = "target_event"
+			select {
+			case p.agentd.KafkaProducer.Input() <- msg:
+				fmt.Println("> message queued to broker (topic: target_event)")
+			case err := <-p.agentd.KafkaProducer.Errors():
+				fmt.Println(err)
+			}
+		}
+
+		err := db.WriteObuEvent(event)
 		if err != nil {
 			fmt.Println(err)
 		} else {

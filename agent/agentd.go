@@ -26,7 +26,7 @@ type AgentD struct {
 	Clients map[string]*Conn
 
 	kafkaClient   *kafka.Client
-	KafkaProducer *kafka.SimpleProducer
+	KafkaProducer *kafka.Producer
 
 	notifyChan chan interface{}
 	exitChan   chan int
@@ -58,7 +58,7 @@ func NewAgentD(opts *AgentdOptions, proto Protocol) *AgentD {
 		os.Exit(1)
 	}
 
-	kafkaProducer, err := kafka.NewSimpleProducer(kafkaClient, "obu_event", nil)
+	kafkaProducer, err := kafka.NewProducer(kafkaClient, nil)
 	if err != nil {
 		a.logf("FATAL: failed to create kafka producer - %s", err)
 		kafkaClient.Close()
